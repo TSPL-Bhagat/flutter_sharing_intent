@@ -310,8 +310,19 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
                   return nil
               }
         
-        if (identifier.starts(with: "file://") || identifier.starts(with: "/var/mobile/Media") || identifier.starts(with: "/private/var/mobile")) {
-            return identifier.replacingOccurrences(of: "file://", with: "")
+        // A file URL — only produced by older extension builds, which reported
+        // `absoluteString`. Go through URL so percent-escapes (umlauts, "#",
+        // spaces) are decoded back into a usable filesystem path.
+        if identifier.starts(with: "file://") {
+            return URL(string: identifier)?.path
+                ?? identifier.replacingOccurrences(of: "file://", with: "")
+        }
+        // Already an absolute filesystem path. Covers the device container
+        // (/private/var/mobile/...) and the simulator's CoreSimulator path,
+        // which no fixed prefix can match. Photos local identifiers are UUID
+        // based and never start with "/".
+        if identifier.starts(with: "/") {
+            return identifier
         }
         guard let phAsset = PHAsset.fetchAssets(
                  withLocalIdentifiers: [identifier],
