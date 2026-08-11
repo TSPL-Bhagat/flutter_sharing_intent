@@ -352,25 +352,40 @@ open class FSIShareViewController: SLComposeServiceViewController {
         }
         guard let url = URL(string: encoded) else { completeAndExit(); return }
 
-        // On iOS 18+ the undocumented openURL: responder-chain hack no longer works
-        // inside Share Extensions because UIApplication is not reachable from the
-        // extension's responder chain. Use the documented NSExtensionContext API instead.
-        if #available(iOS 18.0, *) {
+        // Walking the responder chain for UIApplication is undocumented, but it is
+        // the only mechanism that actually opens a custom scheme from a Share
+        // extension — verified working on iOS 18 hardware. Do not gate it behind an
+        // availability check: NSExtensionContext.open is the documented API but is
+        // honoured only for the Today and iMessage extension points, so for a Share
+        // extension it silently does nothing and the host app never comes forward.
+        // It is kept as a fallback in case a future iOS closes the responder route.
+        if !openViaResponderChain(url) {
+            log("redirectToHostApp: no responder could open \(url), falling back to extensionContext")
             extensionContext?.open(url, completionHandler: nil)
-        } else {
-            // Earlier iOS versions don't expose extensionContext?.open(_:completionHandler:),
-            // so we fall back to walking the responder chain to find an object that
-            // responds to openURL: (typically UIApplication) and invoke it directly.
-            let sel = sel_registerName("openURL:")
-            var responder: UIResponder? = self
-            while responder != nil {
-                if responder?.responds(to: sel) ?? false { _ = responder?.perform(sel, with: url) }
-                responder = responder?.next
-            }
         }
         extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
     }
-    
+
+    /// Walks up from this view controller looking for something able to open a
+    /// URL. Returns whether the open was actually dispatched, so the caller can
+    /// fall back rather than fail silently.
+    private func openViaResponderChain(_ url: URL) -> Bool {
+        let sel = sel_registerName("openURL:")
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let application = current as? UIApplication {
+                application.open(url, options: [:], completionHandler: nil)
+                return true
+            }
+            if current.responds(to: sel) {
+                _ = current.perform(sel, with: url)
+                return true
+            }
+            responder = current.next
+        }
+        return false
+    }
+
     // MARK: - File / thumbnail / metadata helpers
     func getExtension(from url: URL, type: SharingFileType) -> String {
         let parts = url.lastPathComponent.components(separatedBy: ".")
@@ -504,7 +519,11 @@ open class FSIShareViewController: SLComposeServiceViewController {
     }
     
     // MARK: - Logging
-    private func log(_ s: String) { if debugLogs { print("[FSIShareVC] \(s)") } }
+    // NSLog rather than print: a Share extension's stdout is not captured, so
+    // print() is only visible with a debugger already attached. NSLog reaches the
+    // unified log, where `log stream --predicate 'process == "ShareExtension"'`
+    // can pick it up without attaching to a process that is not running yet.
+    private func log(_ s: String) { if debugLogs { NSLog("[FSIShareVC] %@", s) } }
     
 }
 
