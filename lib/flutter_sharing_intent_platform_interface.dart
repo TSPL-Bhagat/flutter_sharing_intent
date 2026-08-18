@@ -42,4 +42,16 @@ abstract class FlutterSharingIntentPlatform extends PlatformInterface {
   Stream<List<SharedFile>> getMediaStream() {
     throw UnimplementedError('getMediaStream() has not been implemented.');
   }
+
+  Future<String> getDebugLogs() async {
+    throw UnimplementedError('getDebugLogs() has not been implemented.');
+  }
+
+  Future<void> clearDebugLogs() async {
+    throw UnimplementedError('clearDebugLogs() has not been implemented.');
+  }
+
+  Future<void> shareDebugLogs() async {
+    throw UnimplementedError('shareDebugLogs() has not been implemented.');
+  }
 }

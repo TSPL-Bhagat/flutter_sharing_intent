@@ -99,6 +99,13 @@ class _MyAppState extends State<MyApp> {
               child: SingleChildScrollView(
                   child: Text('Sharing data: \n${list?.join("\n\n")}\n'))),
         ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () {
+            FlutterSharingIntent.instance.shareDebugLogs();
+          },
+          icon: const Icon(Icons.bug_report),
+          label: const Text('Share Logs'),
+        ),
       ),
     );
   }

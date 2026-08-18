@@ -63,4 +63,20 @@ class MethodChannelFlutterSharingIntent extends FlutterSharingIntentPlatform {
       ),
     );
   }
+
+  @override
+  Future<String> getDebugLogs() async {
+    final logs = await methodChannel.invokeMethod<String>('getDebugLogs');
+    return logs ?? '';
+  }
+
+  @override
+  Future<void> clearDebugLogs() async {
+    await methodChannel.invokeMethod('clearDebugLogs');
+  }
+
+  @override
+  Future<void> shareDebugLogs() async {
+    await methodChannel.invokeMethod('shareDebugLogs');
+  }
 }

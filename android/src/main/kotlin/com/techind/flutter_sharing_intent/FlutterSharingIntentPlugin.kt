@@ -78,6 +78,7 @@ class FlutterSharingIntentPlugin: FlutterPlugin, ActivityAware, MethodCallHandle
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
     when (call.method) {
       "getInitialSharing" -> {
+         FSILogger.log(applicationContext, "getInitialSharing: returning ${initialSharing?.length() ?: 0} item(s)", TAG)
          result.success(initialSharing?.toString())
           /// Clear cache data to send only once
           initialSharing = null
@@ -88,8 +89,36 @@ class FlutterSharingIntentPlugin: FlutterPlugin, ActivityAware, MethodCallHandle
         latestSharing = null
         result.success(null)
       }
+      "getDebugLogs" -> {
+        result.success(FSILogger.readAll(applicationContext))
+      }
+      "clearDebugLogs" -> {
+        FSILogger.clear(applicationContext)
+        result.success(null)
+      }
+      "shareDebugLogs" -> {
+        shareDebugLogsAsText(result)
+      }
       else -> result.notImplemented()
     }
+  }
+
+  private fun shareDebugLogsAsText(result: Result) {
+    val logs = FSILogger.readAll(applicationContext)
+    if (logs.isEmpty()) {
+      result.error("NO_LOGS", "No debug logs to share yet", null)
+      return
+    }
+    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+      type = "text/plain"
+      putExtra(Intent.EXTRA_TEXT, logs)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    val chooser = Intent.createChooser(sendIntent, "Share debug logs").apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    (binding?.activity ?: applicationContext).startActivity(chooser)
+    result.success(null)
   }
 
   override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
@@ -116,6 +145,7 @@ class FlutterSharingIntentPlugin: FlutterPlugin, ActivityAware, MethodCallHandle
     lastIntentTime = now
 
     Log.d(TAG,"handleIntent ==>> ${intent.action}, ${intent.type}")
+    FSILogger.log(applicationContext, "handleIntent action=${intent.action} type=${intent.type} initial=$initial", TAG)
     when {
       (intent.type?.startsWith("text") != true)
               && (intent.action == Intent.ACTION_SEND

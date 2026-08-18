@@ -40,6 +40,7 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
         
         switch call.method {
         case "getInitialSharing":
+            FSILogger.shared.log("getInitialSharing: returning \(self.initialSharing?.count ?? 0) item(s)", tag: "Plugin")
             result(toJson(data: self.initialSharing));
             /// Clear cache data to send only once
             self.initialSharing = nil
@@ -49,12 +50,54 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
             self.initialSharing = nil
             self.latestSharing = nil
             result(nil);
-            
+
         case "getPlatformVersion" :
             result("iOS " + UIDevice.current.systemVersion);
+
+        case "getDebugLogs":
+            result(FSILogger.shared.readAll())
+
+        case "clearDebugLogs":
+            FSILogger.shared.clear()
+            result(nil)
+
+        case "shareDebugLogs":
+            presentShareSheetForLogs(result: result)
+
         default:
             result(FlutterMethodNotImplemented);
         }
+    }
+
+    private func presentShareSheetForLogs(result: @escaping FlutterResult) {
+        guard let fileURL = FSILogger.shared.fileURLForSharing,
+              FileManager.default.fileExists(atPath: fileURL.path) else {
+            result(FlutterError(code: "NO_LOGS", message: "No debug logs to share yet", details: nil))
+            return
+        }
+        guard let topVC = Self.topViewController() else {
+            result(FlutterError(code: "NO_VIEW_CONTROLLER", message: "Could not find a view controller to present the share sheet from", details: nil))
+            return
+        }
+        let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+        if let popover = activityVC.popoverPresentationController {
+            popover.sourceView = topVC.view
+            popover.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0)
+        }
+        topVC.present(activityVC, animated: true, completion: nil)
+        result(nil)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+        var top = keyWindow?.rootViewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
     }
     
     // By Adding bundle id to prefix, we will ensure that the correct app will be openned
@@ -72,6 +115,7 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
     // them from getting the chance to.
     // Reference: https://developer.apple.com/documentation/uikit/uiapplicationdelegate/1622921-application
     public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [AnyHashable : Any] = [:]) -> Bool {
+        FSILogger.shared.log("didFinishLaunchingWithOptions: hasUrlKey=\(launchOptions[UIApplication.LaunchOptionsKey.url] != nil) hasActivityKey=\(launchOptions[UIApplication.LaunchOptionsKey.userActivityDictionary] != nil)", tag: "Plugin")
         if let url = launchOptions[UIApplication.LaunchOptionsKey.url] as? URL {
             if (hasSameSchemePrefix(url: url)) {
                 return handleUrl(url: url, setInitialData: true)
@@ -90,7 +134,23 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
                 }
             }
         }
-        return true
+        // No launch URL / user activity was delivered — most commonly because the
+        // Share Extension's hand-off via NSExtensionContext.open(_:) was dropped by
+        // the system (a known iOS reliability issue with custom URL schemes; see
+        // FSILogger "open(url:) success=false" entries). The extension already wrote
+        // the shared payload to the App Group store regardless of whether the
+        // redirect succeeded, so check for it directly instead of depending on the
+        // unreliable URL-based hand-off.
+        return handleUrl(url: nil, setInitialData: true)
+    }
+
+    // Fallback for the warm-resume case: the host app was merely backgrounded
+    // (not cold-launched) when the extension tried to hand off, so
+    // didFinishLaunchingWithOptions never fires. If the URL hand-off also failed,
+    // check the App Group store again once the user brings the app back to the
+    // foreground themselves.
+    public func applicationDidBecomeActive(_ application: UIApplication) {
+        _ = handleUrl(url: nil, setInitialData: false)
     }
     
     // This is the function called on resuming the app from a shared link.
@@ -99,6 +159,7 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
     // If the URL does not include the module's prefix, then we return false to indicate our module's attempt to open the resource failed and others should be allowed to.
     // Reference: https://developer.apple.com/documentation/uikit/uiapplicationdelegate/1623112-application
     public func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        FSILogger.shared.log("application(open:) url=\(url.absoluteString) hasSameSchemePrefix=\(hasSameSchemePrefix(url: url))", tag: "Plugin")
         if (hasSameSchemePrefix(url: url)) {
             return handleUrl(url: url, setInitialData: false)
         }
@@ -167,19 +228,23 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
     }
 
     private func handleUrl(url: URL?, setInitialData: Bool) -> Bool {
+           FSILogger.shared.log("handleUrl: url=\(url?.absoluteString ?? "nil") setInitialData=\(setInitialData)", tag: "Plugin")
            let appGroupId = Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String
            let defaultGroupId = "group.\(Bundle.main.bundleIdentifier!)"
-           let userDefaults = UserDefaults(suiteName: appGroupId ?? defaultGroupId)
-           
+           let resolvedGroupId = appGroupId ?? defaultGroupId
+           let userDefaults = UserDefaults(suiteName: resolvedGroupId)
+           FSILogger.shared.log("handleUrl: appGroupId=\(resolvedGroupId) ud=\(userDefaults != nil ? "ok" : "NIL")", tag: "Plugin")
+
            let message = userDefaults?.string(forKey: kUserDefaultsMessageKey)
            if let json = userDefaults?.object(forKey: kUserDefaultsKey) as? Data {
                let sharedArray = decode(data: json)
+               FSILogger.shared.log("handleUrl: decoded \(sharedArray.count) item(s) from \(json.count) bytes", tag: "Plugin")
                let sharedMediaFiles: [SharingFile] = sharedArray.compactMap {
                    guard let value = $0.type == .text || $0.type == .url ? $0.value
                            : getAbsolutePath(for: $0.value) else {
                        return nil
                    }
-                   
+
                    return SharingFile(
                     value: value,
                        mimeType: $0.mimeType,
@@ -194,6 +259,14 @@ public class SwiftFlutterSharingIntentPlugin: NSObject, FlutterStreamHandler, Fl
                    initialSharing = latestSharing
                }
                eventSinkMedia?(toJson(data: latestSharing))
+
+               // Clear the App Group entry now that it has been delivered, so an
+               // unrelated future launch (e.g. applicationDidBecomeActive firing on
+               // every foreground) doesn't keep redelivering the same stale share.
+               userDefaults?.removeObject(forKey: kUserDefaultsKey)
+               userDefaults?.removeObject(forKey: kUserDefaultsMessageKey)
+           } else {
+               FSILogger.shared.log("handleUrl: no data found under key '\(kUserDefaultsKey)' in App Group store", tag: "Plugin")
            }
            return true
        }

@@ -43,4 +43,22 @@ class FlutterSharingIntent {
     _streamMedia ??= FlutterSharingIntentPlatform.instance.getMediaStream();
     return _streamMedia!;
   }
+
+  /// Returns the accumulated native-side debug log (attachment processing,
+  /// App Group read/write, and app-launch hand-off events) as plain text.
+  /// Useful for diagnosing sharing issues without an attached debugger.
+  Future<String> getDebugLogs() {
+    return FlutterSharingIntentPlatform.instance.getDebugLogs();
+  }
+
+  /// Clears the accumulated native-side debug log.
+  Future<void> clearDebugLogs() {
+    return FlutterSharingIntentPlatform.instance.clearDebugLogs();
+  }
+
+  /// Opens the native share sheet with the current debug log so it can be
+  /// sent to a developer for troubleshooting.
+  Future<void> shareDebugLogs() {
+    return FlutterSharingIntentPlatform.instance.shareDebugLogs();
+  }
 }

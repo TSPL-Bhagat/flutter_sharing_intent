@@ -127,16 +127,20 @@ open class FSIShareViewController: SLComposeServiceViewController {
     
     // MARK: - Attachment processing (clean RSI style, preserve FSI features)
     private func processAttachments() {
+        log("processAttachments: viewDidAppear fired")
         guard let content = extensionContext?.inputItems.first as? NSExtensionItem else {
+            log("processAttachments: no NSExtensionItem in inputItems — completing")
             completeAndExit()
             return
         }
-        
+
         guard let attachments = content.attachments, !attachments.isEmpty else {
+            log("processAttachments: no attachments — completing")
             completeAndExit()
             return
         }
         
+        log("processAttachments: \(attachments.count) attachment(s), types=\(attachments.map { $0.registeredTypeIdentifiers })")
         // Use DispatchGroup to wait for async loads
         let group = DispatchGroup()
         for (index, provider) in attachments.enumerated() {
@@ -221,6 +225,7 @@ open class FSIShareViewController: SLComposeServiceViewController {
         
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
+            self.log("processAttachments: group.notify — sharedMedia.count=\(self.sharedMedia.count)")
             // if we have media -> media, else fallback to complete
             if !self.sharedMedia.isEmpty {
                 // Auto-redirect to the host app unless the subclass opted out.
@@ -332,17 +337,22 @@ open class FSIShareViewController: SLComposeServiceViewController {
     
     private func saveAndRedirect(message: String? = nil) {
         let ud = UserDefaults(suiteName: appGroupId)
+        log("saveAndRedirect: appGroupId=\(appGroupId) ud=\(ud != nil ? "ok" : "NIL — App Group container unreachable")")
         if !sharedMedia.isEmpty {
             if let data = try? JSONEncoder().encode(sharedMedia) {
                 ud?.set(data, forKey: kUserDefaultsKey)
+                log("saveAndRedirect: wrote \(data.count) bytes / \(sharedMedia.count) item(s) to UserDefaults")
+            } else {
+                log("saveAndRedirect: JSONEncoder().encode(sharedMedia) FAILED")
             }
         }
         ud?.set(message, forKey: kUserDefaultsMessageKey)
-        ud?.synchronize()
+        let synced = ud?.synchronize()
+        log("saveAndRedirect: synchronize()=\(String(describing: synced))")
         redirectToHostApp()
     }
-    
-    
+
+
     private func redirectToHostApp() {
         loadIds()
         let raw = "\(kSchemePrefix)-\(hostAppBundleIdentifier)://dataUrl=\(kUserDefaultsKey)"
@@ -352,12 +362,22 @@ open class FSIShareViewController: SLComposeServiceViewController {
             return
         }
         guard let url = URL(string: encoded) else { completeAndExit(); return }
+        log("redirectToHostApp: url=\(url.absoluteString)")
 
         // On iOS 18+ the undocumented openURL: responder-chain hack no longer works
         // inside Share Extensions because UIApplication is not reachable from the
         // extension's responder chain. Use the documented NSExtensionContext API instead.
         if #available(iOS 18.0, *) {
-            extensionContext?.open(url, completionHandler: nil)
+            // Wait for the open(url:) handoff to actually be accepted by the system
+            // before tearing down the extension via completeRequest. Calling
+            // completeRequest immediately (fire-and-forget) races the async open
+            // request: if the extension process is torn down first, the request to
+            // launch the host app can be silently dropped, which shows up as the
+            // host app flashing open and then bouncing straight back.
+            extensionContext?.open(url, completionHandler: { [weak self] success in
+                self?.log("redirectToHostApp: open(url:) success=\(success)")
+                self?.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+            })
         } else {
             // Earlier iOS versions don't expose extensionContext?.open(_:completionHandler:),
             // so we fall back to walking the responder chain to find an object that
@@ -368,8 +388,8 @@ open class FSIShareViewController: SLComposeServiceViewController {
                 if responder?.responds(to: sel) ?? false { _ = responder?.perform(sel, with: url) }
                 responder = responder?.next
             }
+            extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
         }
-        extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
     }
     
     // MARK: - File / thumbnail / metadata helpers
@@ -505,7 +525,10 @@ open class FSIShareViewController: SLComposeServiceViewController {
     }
     
     // MARK: - Logging
-    private func log(_ s: String) { if debugLogs { print("[FSIShareVC] \(s)") } }
+    private func log(_ s: String) {
+        if debugLogs { print("[FSIShareVC] \(s)") }
+        FSILogger.shared.log(s, tag: "ShareVC")
+    }
     
 }
 
