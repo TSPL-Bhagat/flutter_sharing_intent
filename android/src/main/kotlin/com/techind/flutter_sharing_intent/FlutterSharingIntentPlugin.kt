@@ -227,8 +227,8 @@ class FlutterSharingIntentPlugin: FlutterPlugin, ActivityAware, MethodCallHandle
         }
         val path = uri?.let{ MyFileDirectory.getAbsolutePath(applicationContext, it) }
         if (path != null) {
-          val type = path?.let { getMediaType(it) }
-          val thumbnail = path?.let { getThumbnail(it, type) }
+          val type = getMediaType(path)
+          val thumbnail = getThumbnail(path, type)
           val duration = getDuration(path, type)
 
           JSONArray().put(
@@ -250,8 +250,8 @@ class FlutterSharingIntentPlugin: FlutterPlugin, ActivityAware, MethodCallHandle
         val value = uris?.mapNotNull { uri ->
           val path = MyFileDirectory.getAbsolutePath(applicationContext, uri)
             ?: return@mapNotNull null
-          val type = path?.let { getMediaType(it) }
-          val thumbnail = path?.let { getThumbnail(it, type) }
+          val type = getMediaType(path)
+          val thumbnail = getThumbnail(path, type)
           val duration = getDuration(path, type)
           return@mapNotNull JSONObject()
             .put("value", path)
