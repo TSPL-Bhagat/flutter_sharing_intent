@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'techind' => 'techind@gmail.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'flutter_sharing_intent/Sources/flutter_sharing_intent/**/*.swift'
   s.dependency 'Flutter'
   s.ios.deployment_target = '12.0'
 
@@ -39,7 +39,7 @@ Pod::Spec.new do |s|
 
   # Add resource bundle for Apple manifest policy
   s.resource_bundle = {
-    'MySDKPrivacy' => ['Resources/PrivacyInfo.xcprivacy']
+    'MySDKPrivacy' => ['flutter_sharing_intent/Sources/flutter_sharing_intent/PrivacyInfo.xcprivacy']
   }
   s.swift_version = '5.0'
 end
